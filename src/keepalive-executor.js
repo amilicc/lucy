@@ -51,13 +51,23 @@ async function loginIfRequired(task, page) {
     return { success: true, attempted: false, message: "检测到登录成功标记，当前登录有效" };
   }
 
+  // 当同时配置了登录成功和登录失效标记时，必须命中其中一个才能决定下一步。
+  // 如果两个标记都没有出现，即使页面上存在密码框，也不能据此认定已掉线并重复提交凭据。
+  if (task.success_selector && task.logged_out_selector && !successMarker && !loggedOutMarker) {
+    return {
+      success: false,
+      attempted: false,
+      message: "未检测到登录成功或登录失效标记，已暂停自动提交密码；请检查选择器是否匹配当前页面"
+    };
+  }
+
   const passwordField = await findVisible(
     page,
     task.password_selector,
     ['input[type="password"]']
   );
 
-  // 如果用户配置了成功标记，但页面既没有成功标记也没有登录表单，状态不明确，不能盲目提交密码。
+  // 配置成功标记但未命中时，若也没有明确的登录表单/失效标记，不盲目提交密码。
   if (!loggedOutMarker && !passwordField) {
     if (task.success_selector) {
       return { success: false, attempted: false, message: "未检测到登录成功标记或登录表单，登录状态不明确；请检查成功/失效选择器" };
@@ -177,7 +187,11 @@ async function refreshTask(id, record) {
         ? `${auth.message}；云端登录态备份失败，请检查 rclone 配置`
         : auth.message;
       updateKeepaliveTaskStatus(id, "running", message, now);
-      if (auth.attempted) addLog(`登录保活任务 #${id} 登录流程完成`);
+      if (auth.attempted) {
+        addLog(`登录保活任务 #${id} 已执行登录提交并完成本轮检查`);
+      } else if (record.task.auth_mode !== "none" && auth.success) {
+        addLog(`登录保活任务 #${id} 已检测到登录状态，跳过重复登录`);
+      }
     }
   } catch (error) {
     if (!record.stopRequested) {
