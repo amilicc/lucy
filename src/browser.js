@@ -10,6 +10,8 @@ let browser = null;
 let context = null;
 let browserStartupPromise = null;
 let browserStateBackupRunning = false;
+const BROWSER_STATE_BACKUP_INTERVAL = 60 * 60 * 1000;
+let lastBrowserStateBackupAt = 0;
 
 const dataDir = process.env.DATA_DIR || "/tmp/remain-data";
 const browserStateEncryptedPath = path.join(dataDir, "browser-state.enc");
@@ -343,6 +345,11 @@ async function restoreBrowserState() {
 }
 
 async function backupBrowserState() {
+  // 登录保活刷新可以频繁执行，但成功备份后 1 小时内不重复上传。
+  // 首次调用立即备份；后续由正常刷新触发检查，达到间隔后才再次上传。
+  if (lastBrowserStateBackupAt && Date.now() - lastBrowserStateBackupAt < BROWSER_STATE_BACKUP_INTERVAL) {
+    return true;
+  }
   if (browserStateBackupRunning) {
     console.log("[BrowserState] 上一次登录态备份尚未结束，跳过本次");
     return false;
@@ -370,7 +377,8 @@ async function backupBrowserState() {
       "copy", browserStateEncryptedPath, remoteBrowserFolder
     ], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 120000 });
 
-    console.log("[BrowserState] 登录态已加密备份到云端");
+    lastBrowserStateBackupAt = Date.now();
+    console.log("[BrowserState] 登录态已加密备份到云端（下次最早 1 小时后）");
     return true;
   } catch (error) {
     const reason = String(error.message || "未知错误").split("\nCall log:")[0].slice(0, 240);

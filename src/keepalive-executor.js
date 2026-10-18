@@ -113,7 +113,8 @@ async function loginIfRequired(task, page) {
 
 async function saveLoginState(record) {
   if (record.task.auth_mode === "none") return true;
-  if (record.stateBackupAttempted) return record.stateSaved;
+  // 每次成功刷新都检查备份时机；实际上传频率由 browser.js 统一限制为每小时一次。
+  // 因此刷新可以是 30 秒、60 秒等频率，但不会每次都执行 rclone 上传。
   record.stateBackupAttempted = true;
   record.stateSaved = await backupBrowserState();
   return record.stateSaved;
