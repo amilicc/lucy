@@ -39,22 +39,41 @@ async function loginIfRequired(task, page) {
     return { success: true, attempted: false, message: "页面已打开，保活运行中" };
   }
 
+  // 优先使用每个网站单独配置的标记，避免每次刷新都重复提交密码。
+  const loggedOutMarker = task.logged_out_selector
+    ? await firstVisible(page, task.logged_out_selector)
+    : null;
+  const successMarker = task.success_selector
+    ? await firstVisible(page, task.success_selector)
+    : null;
+
+  if (!loggedOutMarker && successMarker) {
+    return { success: true, attempted: false, message: "检测到登录成功标记，当前登录有效" };
+  }
+
   const passwordField = await findVisible(
     page,
     task.password_selector,
     ['input[type="password"]']
   );
 
-  if (!passwordField) {
+  // 如果用户配置了成功标记，但页面既没有成功标记也没有登录表单，状态不明确，不能盲目提交密码。
+  if (!loggedOutMarker && !passwordField) {
     if (task.success_selector) {
-      const success = await firstVisible(page, task.success_selector);
-      if (!success) {
-        return { success: false, attempted: false, message: "未检测到登录成功标记，请检查成功选择器或网站登录状态" };
-      }
+      return { success: false, attempted: false, message: "未检测到登录成功标记或登录表单，登录状态不明确；请检查成功/失效选择器" };
     }
-    return { success: true, attempted: false, message: "未发现登录表单，按已有登录态处理" };
+    return {
+      success: true,
+      attempted: false,
+      message: task.logged_out_selector
+        ? "未检测到登录失效标记，按当前登录态继续保活"
+        : "未发现登录表单，按已有登录态处理"
+    };
   }
 
+  if (!passwordField) {
+    return { success: false, attempted: false, message: "检测到登录失效，但未找到可见的密码输入框；请检查密码选择器或登录页面" };
+  }
   if (!task.password) {
     return { success: false, attempted: false, message: "缺少登录密码" };
   }
@@ -78,8 +97,7 @@ async function loginIfRequired(task, page) {
   }
 
   await passwordField.fill(task.password);
-
-  let submit = await findVisible(page, task.submit_selector, [
+  const submit = await findVisible(page, task.submit_selector, [
     'button[type="submit"]',
     'input[type="submit"]',
     'button:has-text("Sign in")',
@@ -88,11 +106,8 @@ async function loginIfRequired(task, page) {
     'button:has-text("Continue")'
   ]);
 
-  if (submit) {
-    await submit.click({ timeout: 10000 });
-  } else {
-    await passwordField.press("Enter");
-  }
+  if (submit) await submit.click({ timeout: 10000 });
+  else await passwordField.press("Enter");
 
   await page.waitForTimeout(2500);
 
@@ -102,9 +117,12 @@ async function loginIfRequired(task, page) {
       return { success: false, attempted: true, message: "提交后未检测到登录成功标记；可能密码错误或需要额外验证" };
     }
   } else {
+    const stillLoggedOut = task.logged_out_selector
+      ? await firstVisible(page, task.logged_out_selector)
+      : null;
     const stillHasPassword = await firstVisible(page, task.password_selector || 'input[type="password"]');
-    if (stillHasPassword) {
-      return { success: false, attempted: true, message: "提交后登录表单仍可见；请检查凭据、选择器或网站是否需要额外验证" };
+    if (stillLoggedOut || stillHasPassword) {
+      return { success: false, attempted: true, message: "提交后登录表单或失效标记仍可见；请检查凭据、选择器或网站是否需要额外验证" };
     }
   }
 

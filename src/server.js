@@ -1183,7 +1183,7 @@ app.post("/api/keepalive-tasks", async (req, res) => {
       return res.status(400).json({ error: "请输入登录密码" });
     }
 
-    const selectorFields = ["username_selector", "password_selector", "submit_selector", "success_selector"];
+    const selectorFields = ["username_selector", "password_selector", "submit_selector", "success_selector", "logged_out_selector"];
     const selectors = {};
     for (const field of selectorFields) {
       const value = String(req.body?.[field] || "").trim();
@@ -1211,7 +1211,7 @@ app.put("/api/keepalive-tasks/:id", async (req, res) => {
     if (!oldTask) return res.status(404).json({ error: "登录保活任务不存在" });
 
     const values = {};
-    for (const field of ["name", "url", "refresh_interval_seconds", "auth_mode", "username", "password", "username_selector", "password_selector", "submit_selector", "success_selector"]) {
+    for (const field of ["name", "url", "refresh_interval_seconds", "auth_mode", "username", "password", "username_selector", "password_selector", "submit_selector", "success_selector", "logged_out_selector"]) {
       if (req.body?.[field] !== undefined) values[field] = req.body[field];
     }
     if (values.name !== undefined) {
@@ -1235,7 +1235,7 @@ app.put("/api/keepalive-tasks/:id", async (req, res) => {
     }
     if (values.password !== undefined) values.password = String(values.password);
     if (values.username !== undefined) values.username = String(values.username);
-    for (const field of ["username_selector", "password_selector", "submit_selector", "success_selector"]) {
+    for (const field of ["username_selector", "password_selector", "submit_selector", "success_selector", "logged_out_selector"]) {
       if (values[field] !== undefined) {
         values[field] = String(values[field] || "").trim();
         if (values[field].length > 250) return res.status(400).json({ error: "选择器长度不能超过 250 个字符" });

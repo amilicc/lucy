@@ -324,8 +324,8 @@
           </div>
 
           <details class="keepalive-advanced">
-            <summary>高级选项（可选：网站登录表单选择器）</summary>
-            <p>默认会尝试识别常见输入框和登录按钮；如果网站表单特殊，可以填写 CSS 选择器。成功选择器用于确认登录成功。</p>
+            <summary>高级选项（可选：登录状态检测与表单选择器）</summary>
+            <p>默认自动识别常见登录表单。为了避免每次刷新重复登录，可填写登录成功标记或登录失效标记；成功标记在已登录页面出现，失效标记在登录过期时出现。选择器使用 CSS 语法。</p>
             <div class="form-grid">
               <div class="form-group">
                 <label for="keepalive-username-selector">用户名输入框选择器</label>
@@ -341,7 +341,11 @@
               </div>
               <div class="form-group">
                 <label for="keepalive-success-selector">登录成功标记选择器</label>
-                <input id="keepalive-success-selector" type="text" placeholder="例如：.account-avatar；留空则自动判断">
+                <input id="keepalive-success-selector" type="text" placeholder="例如：.account-avatar；已登录时出现">
+              </div>
+              <div class="form-group">
+                <label for="keepalive-logged-out-selector">登录失效标记选择器</label>
+                <input id="keepalive-logged-out-selector" type="text" placeholder="例如：.login-form；掉线时出现">
               </div>
             </div>
           </details>

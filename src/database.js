@@ -240,6 +240,7 @@ function initializeDatabase() {
       password_selector TEXT,
       submit_selector TEXT,
       success_selector TEXT,
+      logged_out_selector TEXT,
       enabled INTEGER NOT NULL DEFAULT 0,
       status TEXT NOT NULL DEFAULT 'stopped',
       last_refresh TEXT,
@@ -257,6 +258,15 @@ function initializeDatabase() {
     .prepare("PRAGMA table_info(tasks)")
     .all()
     .map(row => row.name);
+
+  // 登录保活表升级：为旧数据库增加可配置的“登录失效标记”选择器。
+  const keepaliveColumns = db
+    .prepare("PRAGMA table_info(keepalive_tasks)")
+    .all()
+    .map(row => row.name);
+  if (!keepaliveColumns.includes("logged_out_selector")) {
+    db.exec("ALTER TABLE keepalive_tasks ADD COLUMN logged_out_selector TEXT");
+  }
 
   if (!columns.includes("stay_seconds")) {
     db.exec(`
@@ -731,7 +741,7 @@ function recordVisit(id, status = "success") {
 function getKeepaliveTasks() {
   return db.prepare(`
     SELECT id, name, url, refresh_interval_seconds, auth_mode,
-           username_selector, password_selector, submit_selector, success_selector,
+           username_selector, password_selector, submit_selector, success_selector, logged_out_selector,
            enabled, status, last_refresh, last_status, created_at
     FROM keepalive_tasks
     ORDER BY id ASC
@@ -741,7 +751,7 @@ function getKeepaliveTasks() {
 function getKeepaliveTask(id) {
   return db.prepare(`
     SELECT id, name, url, refresh_interval_seconds, auth_mode,
-           username_selector, password_selector, submit_selector, success_selector,
+           username_selector, password_selector, submit_selector, success_selector, logged_out_selector,
            enabled, status, last_refresh, last_status, created_at
     FROM keepalive_tasks WHERE id = ?
   `).get(id);
@@ -762,18 +772,19 @@ function getKeepaliveTaskForExecution(id) {
 function createKeepaliveTask({
   name, url, refresh_interval_seconds = 60, auth_mode = "none",
   username = "", password = "", username_selector = "",
-  password_selector = "", submit_selector = "", success_selector = "", enabled = 0
+  password_selector = "", submit_selector = "", success_selector = "",
+  logged_out_selector = "", enabled = 0
 }) {
   const result = db.prepare(`
     INSERT INTO keepalive_tasks (
       name, url, refresh_interval_seconds, auth_mode, username_enc, password_enc,
-      username_selector, password_selector, submit_selector, success_selector, enabled, status
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      username_selector, password_selector, submit_selector, success_selector, logged_out_selector, enabled, status
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     name, url, Number(refresh_interval_seconds), auth_mode,
     encryptText(username), encryptText(password),
     username_selector || null, password_selector || null, submit_selector || null,
-    success_selector || null, enabled ? 1 : 0, enabled ? "starting" : "stopped"
+    success_selector || null, logged_out_selector || null, enabled ? 1 : 0, enabled ? "starting" : "stopped"
   );
   return getKeepaliveTask(result.lastInsertRowid);
 }
@@ -792,15 +803,16 @@ function updateKeepaliveTask(id, values = {}) {
   const passwordSelector = values.password_selector !== undefined ? values.password_selector : old.password_selector;
   const submitSelector = values.submit_selector !== undefined ? values.submit_selector : old.submit_selector;
   const successSelector = values.success_selector !== undefined ? values.success_selector : old.success_selector;
+  const loggedOutSelector = values.logged_out_selector !== undefined ? values.logged_out_selector : old.logged_out_selector;
 
   db.prepare(`
     UPDATE keepalive_tasks SET name = ?, url = ?, refresh_interval_seconds = ?, auth_mode = ?,
       username_enc = ?, password_enc = ?, username_selector = ?, password_selector = ?,
-      submit_selector = ?, success_selector = ? WHERE id = ?
+      submit_selector = ?, success_selector = ?, logged_out_selector = ? WHERE id = ?
   `).run(
     name, url, interval, authMode, encryptText(username), encryptText(password),
     usernameSelector || null, passwordSelector || null, submitSelector || null,
-    successSelector || null, id
+    successSelector || null, loggedOutSelector || null, id
   );
   return getKeepaliveTask(id);
 }
