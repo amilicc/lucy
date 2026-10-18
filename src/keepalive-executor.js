@@ -34,19 +34,27 @@ async function findVisible(page, customSelector, defaults) {
   return null;
 }
 
-// Wait for client-side rendering/session restoration after navigation. A DOMContentLoaded
-// event alone does not guarantee that SPA login markers have become visible.
+// Wait for client-side rendering/session restoration after navigation. On many sites,
+// the login form is visible in the initial HTML while JavaScript is still validating the
+// existing session. If both markers are configured, give the success marker priority for
+// a short grace period before accepting the logged-out marker as final.
 async function waitForConfiguredAuthMarker(task, page, timeoutMs = 10000) {
   if (!task.success_selector && !task.logged_out_selector) return;
   const startedAt = Date.now();
+  const graceMs = task.success_selector && task.logged_out_selector ? 5000 : 0;
   while (Date.now() - startedAt < timeoutMs) {
-    const loggedOutMarker = task.logged_out_selector
-      ? await firstVisible(page, task.logged_out_selector)
-      : null;
     const successMarker = task.success_selector
       ? await firstVisible(page, task.success_selector)
       : null;
-    if (loggedOutMarker || successMarker) return;
+    if (successMarker) return;
+
+    const elapsed = Date.now() - startedAt;
+    const loggedOutMarker = task.logged_out_selector
+      ? await firstVisible(page, task.logged_out_selector)
+      : null;
+    // A logged-out marker can be present in the initial HTML before session restoration.
+    // Do not treat it as authoritative until the grace period has elapsed.
+    if (loggedOutMarker && elapsed >= graceMs) return;
     await page.waitForTimeout(250);
   }
 }
@@ -67,7 +75,9 @@ async function loginIfRequired(task, page) {
     ? await firstVisible(page, task.success_selector)
     : null;
 
-  if (!loggedOutMarker && successMarker) {
+  // A visible success marker is the strongest positive signal. It wins over a stale
+  // login-page marker that may remain visible briefly during client-side page switching.
+  if (successMarker) {
     return { success: true, attempted: false, message: "检测到登录成功标记，当前登录有效" };
   }
 
