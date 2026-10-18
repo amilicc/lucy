@@ -168,6 +168,8 @@ const databaseSyncResult =
     "database-sync-result"
   );
 
+const databaseSyncUploadButton = document.getElementById("database-sync-upload-button");
+
 
 /*
  * 编辑任务
@@ -932,7 +934,7 @@ function renderDatabaseSync() {
     );
 
   } else if (
-    result === "暂无"
+    result === "暂无" || result.startsWith("skipped:")
   ) {
 
     databaseSyncResult.classList.add(
@@ -1034,6 +1036,37 @@ async function loadDatabaseSync() {
 
   }
 
+}
+
+
+// 手动上传始终强制上传最新数据库快照，不受“内容未变化”跳过规则影响。
+if (databaseSyncUploadButton) {
+  databaseSyncUploadButton.addEventListener("click", async () => {
+    if (!token || databaseSyncUploadButton.disabled) return;
+    const originalText = databaseSyncUploadButton.textContent;
+    databaseSyncUploadButton.disabled = true;
+    databaseSyncUploadButton.textContent = "上传中…";
+    try {
+      const response = await apiFetch("/api/database-sync/upload", { method: "POST" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "数据库上传失败");
+      await loadDatabaseSync();
+      if (databaseSyncResult) {
+        databaseSyncResult.textContent = data.message || "手动上传成功";
+        databaseSyncResult.classList.remove("database-sync-result-error", "database-sync-result-empty");
+        databaseSyncResult.classList.add("database-sync-result-success");
+      }
+    } catch (error) {
+      if (databaseSyncResult) {
+        databaseSyncResult.textContent = `error: ${error.message || "手动上传失败"}`;
+        databaseSyncResult.classList.remove("database-sync-result-success", "database-sync-result-empty");
+        databaseSyncResult.classList.add("database-sync-result-error");
+      }
+    } finally {
+      databaseSyncUploadButton.disabled = false;
+      databaseSyncUploadButton.textContent = originalText;
+    }
+  });
 }
 
 

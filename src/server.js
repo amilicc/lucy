@@ -15,7 +15,8 @@ const {
   updateKeepaliveTask,
   setKeepaliveTaskEnabled,
   deleteKeepaliveTask,
-  backupDatabase
+  backupDatabase,
+  scheduleDatabaseBackup
 } = require("./database");
 
 const {
@@ -44,15 +45,11 @@ const {
   stopKeepaliveScheduler
 } = require("./keepalive-scheduler");
 
-// 登录保活任务的配置/启停变更后立即备份数据库，避免容器重启后任务丢失。
-// 这里只在任务管理操作时触发，不会在每次网页刷新时触发。
+// 任务配置变更不再立即调用 rclone；合并到每小时的自动检查中。
+// 用户仍可通过数据库同步面板的“立即上传”按钮强制备份。
 async function backupKeepaliveTaskChanges(action) {
-  try {
-    await backupDatabase();
-    console.log(`[Database] 登录保活任务变更已触发数据库备份：${action}`);
-  } catch (error) {
-    console.error(`[Database] 登录保活任务变更后的数据库备份异常（${action}）：${error.message}`);
-  }
+  scheduleDatabaseBackup(action);
+  console.log(`[Database] 登录保活任务变更已合并，约 60 秒后检查是否需要上传：${action}`);
 }
 
 
@@ -416,6 +413,26 @@ app.get(
 
   }
 );
+
+
+/*
+ * ============================
+ * 手动立即上传数据库备份
+ * ============================
+ */
+app.post("/api/database-sync/upload", async (req, res) => {
+  try {
+    const result = await backupDatabase({ force: true });
+    const status = getDatabaseSyncStatus();
+    if (!result || result.success !== true) {
+      return res.status(500).json({ ...status, error: status.result || "数据库上传失败" });
+    }
+    res.json({ ...status, success: true, message: "数据库已手动上传到云端" });
+  } catch (error) {
+    console.error("[API] 手动上传数据库失败：", error.message);
+    res.status(500).json({ error: error.message || "手动上传数据库失败" });
+  }
+});
 
 
 /*

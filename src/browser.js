@@ -2,6 +2,7 @@ const { chromium } = require("playwright");
 const { spawn, execFileSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const { encryptText, decryptText } = require("./keepalive-crypto");
 
 const { addLog } = require("./logger");
@@ -12,6 +13,7 @@ let browserStartupPromise = null;
 let browserStateBackupRunning = false;
 const BROWSER_STATE_BACKUP_INTERVAL = 60 * 60 * 1000;
 let lastBrowserStateBackupAt = 0;
+let lastBrowserStateHash = null;
 
 const dataDir = process.env.DATA_DIR || "/tmp/remain-data";
 const browserStateEncryptedPath = path.join(dataDir, "browser-state.enc");
@@ -369,7 +371,15 @@ async function backupBrowserState() {
     const state = await context.storageState({ indexedDB: true });
     if (!validateStorageState(state)) throw new Error("浏览器未生成有效登录态快照");
 
-    const encrypted = encryptText(JSON.stringify(state));
+    const stateJson = JSON.stringify(state);
+    const stateHash = crypto.createHash("sha256").update(stateJson).digest("hex");
+    if (lastBrowserStateHash && stateHash === lastBrowserStateHash) {
+      lastBrowserStateBackupAt = Date.now();
+      console.log("[BrowserState] 登录态内容未变化，跳过 rclone 上传（下次最早 1 小时后检查）");
+      return true;
+    }
+
+    const encrypted = encryptText(stateJson);
     fs.writeFileSync(browserStateEncryptedPath, encrypted, { encoding: "utf8", mode: 0o600 });
 
     execFileSync("rclone", [
@@ -378,6 +388,7 @@ async function backupBrowserState() {
     ], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 120000 });
 
     lastBrowserStateBackupAt = Date.now();
+    lastBrowserStateHash = stateHash;
     console.log("[BrowserState] 登录态已加密备份到云端（下次最早 1 小时后）");
     return true;
   } catch (error) {

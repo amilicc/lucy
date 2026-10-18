@@ -1,6 +1,7 @@
 const Database = require("better-sqlite3");
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const { execFileSync } = require("child_process");
 const { encryptText, decryptText } = require("./keepalive-crypto");
 
@@ -18,6 +19,9 @@ const BACKUP_INTERVAL = 60 * 60 * 1000;
 
 let db = null;
 let backupRunning = false;
+let lastUploadedHash = null;
+let pendingBackupTimer = null;
+const CHANGE_BACKUP_DEBOUNCE = 60 * 1000;
 
 
 /* =========================================================
@@ -313,7 +317,8 @@ function initializeDatabase() {
    数据库备份 / 同步
    ========================================================= */
 
-async function backupDatabase() {
+async function backupDatabase(options = {}) {
+  const forceUpload = options.force === true;
   // 若备份正在进行，等待它结束后再执行本次备份，避免任务刚变更却被跳过。
   while (backupRunning) {
     console.log("[Database] 上一次备份还未完成，等待后再备份最新数据");
@@ -370,6 +375,18 @@ async function backupDatabase() {
 
     console.log("[Database] 本地备份文件生成完成");
 
+    // 用备份文件内容判断数据库是否真的发生变化；没有变化时跳过 rclone。
+    const currentHash = crypto
+      .createHash("sha256")
+      .update(fs.readFileSync(backupPath))
+      .digest("hex");
+
+    if (!forceUpload && lastUploadedHash && currentHash === lastUploadedHash) {
+      lastSyncResult = "skipped: 数据未变化，已跳过上传";
+      console.log("[Database] 数据库内容未变化，跳过 rclone 上传");
+      return { success: true, skipped: true, reason: "unchanged" };
+    }
+
     /*
      * 标准 rclone copy：
      *
@@ -402,6 +419,8 @@ async function backupDatabase() {
      */
     lastSyncAt = new Date().toISOString();
     lastSyncResult = "success";
+    lastUploadedHash = currentHash;
+    return { success: true, skipped: false };
 
   } catch (error) {
     console.error(
@@ -452,6 +471,24 @@ async function backupDatabase() {
 
 
 /* =========================================================
+   合并短时间内的任务变更，延迟 60 秒上传一次
+   ========================================================= */
+function scheduleDatabaseBackup(reason = "数据库内容变更") {
+  if (pendingBackupTimer) clearTimeout(pendingBackupTimer);
+  pendingBackupTimer = setTimeout(async () => {
+    pendingBackupTimer = null;
+    try {
+      console.log(`[Database] 延迟合并备份开始：${reason}`);
+      await backupDatabase({ force: false });
+    } catch (error) {
+      console.error(`[Database] 延迟合并备份失败：${error.message}`);
+    }
+  }, CHANGE_BACKUP_DEBOUNCE);
+  if (typeof pendingBackupTimer.unref === "function") pendingBackupTimer.unref();
+}
+
+
+/* =========================================================
    获取数据库同步状态
    ========================================================= */
 
@@ -484,10 +521,9 @@ function startDatabaseBackupScheduler() {
      * 本次定时同步开始后，
      * 下一次同步时间继续顺延 1 小时。
      */
-    nextSyncAt =
-      Date.now() + BACKUP_INTERVAL;
+    nextSyncAt = Date.now() + BACKUP_INTERVAL;
 
-    backupDatabase().catch(error => {
+    backupDatabase({ force: false }).catch(error => {
 
       console.error(
         "[Database] 自动备份异常：",
@@ -810,5 +846,6 @@ module.exports = {
   updateKeepaliveTaskStatus,
   deleteKeepaliveTask,
   backupDatabase,
+  scheduleDatabaseBackup,
   getDatabaseSyncStatus
 };

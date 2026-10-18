@@ -729,6 +729,13 @@ button:disabled {
  * ============================
  */
 
+.database-sync-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .database-sync-container {
   display: grid;
 
