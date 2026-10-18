@@ -14,7 +14,8 @@ const {
   createKeepaliveTask,
   updateKeepaliveTask,
   setKeepaliveTaskEnabled,
-  deleteKeepaliveTask
+  deleteKeepaliveTask,
+  backupDatabase
 } = require("./database");
 
 const {
@@ -42,6 +43,17 @@ const {
   startKeepaliveScheduler,
   stopKeepaliveScheduler
 } = require("./keepalive-scheduler");
+
+// 登录保活任务的配置/启停变更后立即备份数据库，避免容器重启后任务丢失。
+// 这里只在任务管理操作时触发，不会在每次网页刷新时触发。
+async function backupKeepaliveTaskChanges(action) {
+  try {
+    await backupDatabase();
+    console.log(`[Database] 登录保活任务变更已触发数据库备份：${action}`);
+  } catch (error) {
+    console.error(`[Database] 登录保活任务变更后的数据库备份异常（${action}）：${error.message}`);
+  }
+}
 
 
 const app = express();
@@ -1126,7 +1138,7 @@ app.get("/api/keepalive-tasks", (req, res) => {
   }
 });
 
-app.post("/api/keepalive-tasks", (req, res) => {
+app.post("/api/keepalive-tasks", async (req, res) => {
   try {
     const name = String(req.body?.name || "").trim();
     const url = String(req.body?.url || "").trim();
@@ -1167,6 +1179,7 @@ app.post("/api/keepalive-tasks", (req, res) => {
       username, password, ...selectors, enabled: 0
     });
     addLog(`创建登录保活任务 #${task.id}`);
+    await backupKeepaliveTaskChanges(`创建任务 #${task.id}`);
     res.json(task);
   } catch (error) {
     console.error("[API] 创建登录保活任务失败：", error.message);
@@ -1225,6 +1238,7 @@ app.put("/api/keepalive-tasks/:id", async (req, res) => {
     if (wasEnabled) await stopKeepaliveTask(id);
     const updated = updateKeepaliveTask(id, values);
     if (wasEnabled) await startKeepaliveTask(id);
+    await backupKeepaliveTaskChanges(`更新任务 #${id}`);
     res.json(updated);
   } catch (error) {
     console.error("[API] 更新登录保活任务失败：", error.message);
@@ -1238,6 +1252,7 @@ app.post("/api/keepalive-tasks/:id/start", async (req, res) => {
     if (!getKeepaliveTask(id)) return res.status(404).json({ error: "登录保活任务不存在" });
     setKeepaliveTaskEnabled(id, 1);
     await startKeepaliveTask(id);
+    await backupKeepaliveTaskChanges(`启动任务 #${id}`);
     res.json(getKeepaliveTask(id));
   } catch (error) {
     setKeepaliveTaskEnabled(id, 0);
@@ -1252,6 +1267,7 @@ app.post("/api/keepalive-tasks/:id/stop", async (req, res) => {
     if (!getKeepaliveTask(id)) return res.status(404).json({ error: "登录保活任务不存在" });
     setKeepaliveTaskEnabled(id, 0);
     await stopKeepaliveTask(id);
+    await backupKeepaliveTaskChanges(`停止任务 #${id}`);
     res.json(getKeepaliveTask(id));
   } catch (error) {
     console.error(`[API] 停止登录保活任务 #${id} 失败：`, error.message);
@@ -1267,6 +1283,7 @@ app.delete("/api/keepalive-tasks/:id", async (req, res) => {
     await stopKeepaliveTask(id);
     deleteKeepaliveTask(id);
     addLog(`删除登录保活任务 #${id}`);
+    await backupKeepaliveTaskChanges(`删除任务 #${id}`);
     res.json({ success: true });
   } catch (error) {
     console.error(`[API] 删除登录保活任务 #${id} 失败：`, error.message);
