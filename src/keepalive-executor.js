@@ -34,7 +34,27 @@ async function findVisible(page, customSelector, defaults) {
   return null;
 }
 
+// Wait for client-side rendering/session restoration after navigation. A DOMContentLoaded
+// event alone does not guarantee that SPA login markers have become visible.
+async function waitForConfiguredAuthMarker(task, page, timeoutMs = 10000) {
+  if (!task.success_selector && !task.logged_out_selector) return;
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const loggedOutMarker = task.logged_out_selector
+      ? await firstVisible(page, task.logged_out_selector)
+      : null;
+    const successMarker = task.success_selector
+      ? await firstVisible(page, task.success_selector)
+      : null;
+    if (loggedOutMarker || successMarker) return;
+    await page.waitForTimeout(250);
+  }
+}
+
 async function loginIfRequired(task, page) {
+  // Wait for either configured marker before deciding to submit credentials. This avoids
+  // mistaking a temporarily hidden success marker during SPA initialization for logout.
+  await waitForConfiguredAuthMarker(task, page);
   if (task.auth_mode === "none") {
     return { success: true, attempted: false, message: "页面已打开，保活运行中" };
   }
