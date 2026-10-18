@@ -314,9 +314,10 @@ function initializeDatabase() {
    ========================================================= */
 
 async function backupDatabase() {
-  if (backupRunning) {
-    console.log("[Database] 上一次备份还未完成，跳过本次备份");
-    return;
+  // 若备份正在进行，等待它结束后再执行本次备份，避免任务刚变更却被跳过。
+  while (backupRunning) {
+    console.log("[Database] 上一次备份还未完成，等待后再备份最新数据");
+    await new Promise(resolve => setTimeout(resolve, 100));
   }
 
   if (!db) {
